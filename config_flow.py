@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import logging
-from . import DOMAIN
 import voluptuous as vol
+from typing import Any, Dict, Optional
 
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_PORT, CONF_EMAIL, CONF_PASSWORD
 from homeassistant.core import callback
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+from .api import TISApi
+from . import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -32,7 +36,9 @@ class TISConfigFlow(ConfigFlow, domain=DOMAIN):
         """Initialize flow and temporary storage for auth data."""
         self._auth_data: dict | None = None
 
-    async def async_step_user(self, user_input: dict | None = None) -> ConfigFlowResult:
+    async def async_step_user(
+        self, user_input: Optional[Dict[str, Any]] = None
+    ) -> ConfigFlowResult:
         """
         Handle a flow initiated by the user.
 
@@ -41,7 +47,8 @@ class TISConfigFlow(ConfigFlow, domain=DOMAIN):
             2) on successful auth -> show port form
             3) on port submit -> create entry with email/password/port
         """
-        errors: dict = {}
+        errors: Dict[str, str] = {}
+        description_placeholders: Dict[str, str] = {}
 
         # First time: show auth form
         if user_input is None:
@@ -52,18 +59,53 @@ class TISConfigFlow(ConfigFlow, domain=DOMAIN):
             email = user_input[CONF_EMAIL]
             password = user_input[CONF_PASSWORD]
 
-            # Do NOT log passwords in real code
             _LOGGER.debug("Received auth input for email=%s", email)
 
-            auth_ok = await self.async_validate_credentials(email, password)
-            if not auth_ok:
-                errors["base"] = "auth_failed"
-                _LOGGER.warning("Authentication failed for %s", email)
-                return self._show_setup_auth_form(errors=errors)
+            payload = {"email": email, "password": password}
+            endpoint = f"{TISApi}/verify-credentials"
+            session = async_get_clientsession(self.hass)
 
-            # Save the authenticated credentials temporarily and show port form
-            self._auth_data = {CONF_EMAIL: email, CONF_PASSWORD: password}
-            return self._show_setup_port_form()
+            async with session.post(endpoint, json=payload) as resp:
+                status = resp.status
+                try:
+                    body = await resp.json()
+                except Exception:
+                    body = {"message": await resp.text()}
+
+                if status == 200:
+                    token = body.get("token")
+                    if not token:
+                        errors["base"] = "unknown"
+                    else:
+                        # Save the authenticated credentials temporarily and show port form
+                        self._auth_data = {CONF_EMAIL: email, CONF_PASSWORD: password}
+                        self._token = token
+                        return self._show_setup_port_form()
+
+                elif status == 400:
+                    # validation error from Laravel. We show a generic field error.
+                    # if you want to show the server message in the form, use description_placeholders
+                    errors["base"] = "invalid_input"
+                    description_placeholders["error"] = body.get(
+                        "message", "Invalid input"
+                    )
+                elif status == 401:
+                    errors["base"] = "invalid_auth"
+                elif status == 429:
+                    errors["base"] = "too_many_requests"
+                    description_placeholders["error"] = body.get(
+                        "message", "Too many attempts"
+                    )
+                else:
+                    errors["base"] = "unknown"
+                    description_placeholders["error"] = body.get(
+                        "message", f"HTTP {status}"
+                    )
+
+                _LOGGER.warning("Authentication failed for %s", email)
+                return self._show_setup_auth_form(
+                    errors=errors, description_placeholders=description_placeholders
+                )
 
         # If user_input contains port -> user submitted the port form
         if CONF_PORT in user_input:
@@ -78,7 +120,7 @@ class TISConfigFlow(ConfigFlow, domain=DOMAIN):
                 return self._show_setup_auth_form(errors=errors)
 
             port = user_input[CONF_PORT]
-            if not await self.validate_port(port):
+            if not self.validate_port(port):
                 errors["base"] = "invalid_port"
                 _LOGGER.error("Provided port is invalid: %s", port)
                 return self._show_setup_port_form(errors=errors)
@@ -86,6 +128,7 @@ class TISConfigFlow(ConfigFlow, domain=DOMAIN):
             # Merge auth data + port and create config entry
             entry_data = {
                 **self._auth_data,
+                "token": self._token,
                 CONF_PORT: port,
             }
 
@@ -107,33 +150,21 @@ class TISConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
     @callback
-    def _show_setup_auth_form(self, errors=None) -> ConfigFlowResult:
+    def _show_setup_auth_form(
+        self, errors=None, description_placeholders=None
+    ) -> ConfigFlowResult:
         """Show the auth (email/password) form to the user."""
         return self.async_show_form(
             step_id="user",
             data_schema=auth_schema,
             errors=errors if errors else {},
+            description_placeholders=(
+                description_placeholders if description_placeholders else {}
+            ),
         )
 
-    async def validate_port(self, port: int) -> bool:
+    def validate_port(self, port: int) -> bool:
         """Validate the port number range."""
         if isinstance(port, int) and 1 <= port <= 65535:
             return True
         return False
-
-    async def async_validate_credentials(self, email: str, password: str) -> bool:
-        """
-        Validate email/password with your bridge/service.
-
-        Replace this placeholder with a real call to the device/cloud.
-        Return True on success, False on failure.
-        """
-        # Example placeholder logic (always fail if empty):
-        if not email or not password:
-            return False
-
-        # TODO: replace with real async authentication:
-        # e.g. await self.hass.async_add_executor_job(sync_client.login, email, password)
-        # or call an async HTTP client here.
-        # For now return True to continue the flow during testing:
-        return True
