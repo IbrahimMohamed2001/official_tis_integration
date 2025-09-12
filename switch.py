@@ -20,8 +20,6 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import TISConfigEntry
 
-protocol_handler = TISProtocolHandler()
-
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: TISConfigEntry, async_add_devices: AddEntitiesCallback
@@ -77,10 +75,12 @@ class TISSwitch(SwitchEntity):
         self.gateway = gateway
         self.channel_number = int(channel_number)
         self.listener: Callable | None = None
-        self.on_packet: TISPacket = protocol_handler.generate_control_on_packet(self)
-        self.off_packet: TISPacket = protocol_handler.generate_control_off_packet(self)
-        self.update_packet: TISPacket = protocol_handler.generate_control_update_packet(
+        self.on_packet: TISPacket = TISProtocolHandler.generate_control_on_packet(self)
+        self.off_packet: TISPacket = TISProtocolHandler.generate_control_off_packet(
             self
+        )
+        self.update_packet: TISPacket = (
+            TISProtocolHandler.generate_control_update_packet(self)
         )
 
     async def async_added_to_hass(self) -> None:
