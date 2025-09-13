@@ -26,7 +26,7 @@ async def async_setup_entry(
 ) -> None:
     """Set up the TIS switches."""
 
-    # tis_api: TISApi = hass.data[DOMAIN]["tis_api"]
+    # getting the tis_api object from the config entry
     tis_api: TISApi = entry.runtime_data.api
 
     # Fetch all switches from the TIS API we only have one type here
