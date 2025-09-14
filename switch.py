@@ -87,15 +87,14 @@ class BaseTISSwitch:
         is_protected: bool = False,
         **kwargs: Any,
     ) -> None:
-        # Call next class in MRO (important for multiple inheritance)
+        """Initialize the base switch attributes."""
         super().__init__(**kwargs)
 
         self.api = tis_api
-
-        # Internal state representation
         self._state = STATE_UNKNOWN
         self._attr_is_on: Optional[bool] = None
 
+        # Unique id
         self._attr_unique_id = (
             f"tis_{'_'.join(map(str, device_id))}_ch{int(channel_number)}"
         )
@@ -104,21 +103,19 @@ class BaseTISSwitch:
         self.gateway = gateway
         self.channel_number = int(channel_number)
         self.is_protected = is_protected
-
         self._listener: Optional[Callable] = None
 
-        # Pre-generate packets
+        # Create packets once
         self.on_packet = TISProtocolHandler.generate_control_on_packet(self)
         self.off_packet = TISProtocolHandler.generate_control_off_packet(self)
         self.update_packet = TISProtocolHandler.generate_control_update_packet(self)
 
-    # --- Lifecycle hooks ---
     async def async_added_to_hass(self) -> None:
-        """Subscribe to events when the entity is added to hass."""
+        """Subscribe to events when entity is added to hass."""
 
         @callback
         def _handle_event(event: Event) -> None:
-            """Handle incoming TIS events and update internal state accordingly."""
+            """Handle incoming TIS events and update state."""
 
             # check if event is for this switch
             if event.event_type == str(self.device_id):
@@ -154,7 +151,7 @@ class BaseTISSwitch:
             self.schedule_update_ha_state()
 
         self._listener = self.hass.bus.async_listen(MATCH_ALL, _handle_event)
-        _ = await self.api.protocol.sender.send_packet(self.update_packet)
+        await self.api.protocol.sender.send_packet(self.update_packet)
 
     async def async_will_remove_from_hass(self) -> None:
         """Unsubscribe from events when entity is removed from hass."""
@@ -164,9 +161,8 @@ class BaseTISSwitch:
             finally:
                 self._listener = None
 
-    # --- Control methods ---
     async def async_turn_on(self, **kwargs: Any) -> None:
-        """Turn the switch on (uses API send with ack)."""
+        """Turn the switch on."""
         ack_status = await self.api.protocol.sender.send_packet_with_ack(self.on_packet)
         if ack_status:
             self._state = STATE_ON
@@ -180,14 +176,11 @@ class BaseTISSwitch:
         self.schedule_update_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        """Turn the switch off (uses API send with ack)."""
+        """Turn the switch off."""
         ack_status = await self.api.protocol.sender.send_packet_with_ack(
             self.off_packet
         )
-        if ack_status:
-            self._state = STATE_OFF
-        else:
-            self._state = STATE_UNKNOWN
+        self._state = STATE_OFF if ack_status else STATE_UNKNOWN
         self.schedule_update_ha_state()
 
 
@@ -204,7 +197,6 @@ class TISSwitch(SwitchEntity, BaseTISSwitch):
         )
         self._name = kwargs.get("switch_name")
 
-    # --- Properties ---
     @property
     def name(self) -> str:
         """Return the name of the switch."""
