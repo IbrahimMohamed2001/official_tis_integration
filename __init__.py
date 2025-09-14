@@ -29,6 +29,7 @@ protocol_handler = TISProtocolHandler()
 
 async def async_setup_entry(hass: HomeAssistant, entry: TISConfigEntry) -> bool:
     """Set up TISControl from a config entry."""
+    hass.data.setdefault(DOMAIN, {})
     tis_api = TISApi(
         port=int(entry.data["port"]),
         hass=hass,
