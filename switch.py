@@ -19,25 +19,30 @@ from . import TISConfigEntry
 async def async_setup_entry(
     hass: HomeAssistant, entry: TISConfigEntry, async_add_devices: AddEntitiesCallback
 ) -> None:
-    """Set up the TIS switches."""
+    """Set up the TIS switches from a config entry."""
 
-    # getting the tis_api object from the config entry
+    # Retrieve the API instance that was created in the main __init__.py
     tis_api: TISApi = entry.runtime_data.api
 
-    # Fetch and normalize switches into simple dictionaries
+    # Fetch all available switches from the TIS gateway.
     switch_dicts = await async_get_switches(tis_api)
     if not switch_dicts:
         return
 
-    # Create TISSwitch objects using **kwargs for readability
+    # Create an entity object for each switch found and add them to Home Assistant.
     tis_switches = [TISSwitch(tis_api, **sd) for sd in switch_dicts]
     async_add_devices(tis_switches, update_before_add=True)
 
 
 class TISSwitch(BaseTISSwitch, SwitchEntity):
-    """Concrete TIS switch entity."""
+    """Represents a TIS switch entity in Home Assistant.
+
+    Inherits from BaseTISSwitch (for API communication) and SwitchEntity (for HA integration).
+    """
 
     def __init__(self, tis_api: TISApi, **kwargs: Any) -> None:
+        """Initialize the switch entity."""
+        # Pass the core device identifiers to the parent API class.
         super().__init__(
             tis_api=tis_api,
             channel_number=kwargs.get("channel_number"),
@@ -45,6 +50,7 @@ class TISSwitch(BaseTISSwitch, SwitchEntity):
             gateway=kwargs.get("gateway"),
             is_protected=kwargs.get("is_protected", False),
         )
+        # Set the friendly name for the Home Assistant UI.
         self._name = kwargs.get("switch_name")
 
     @property
@@ -59,5 +65,5 @@ class TISSwitch(BaseTISSwitch, SwitchEntity):
 
     @property
     def is_on(self) -> bool:
-        """Return True if the switch is on."""
+        """Return the current state of the switch (True if on, False if off)."""
         return self._state == STATE_ON
