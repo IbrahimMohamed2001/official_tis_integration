@@ -1,10 +1,10 @@
-"""Switch platform for integration_blueprint."""
+"""Switch platform for TIS Control."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from math import ceil
-from typing import Any
+from typing import Any, Optional
 
 from TISApi.BytesHelper import int_to_8_bit_binary
 from TISApi.api import TISApi
@@ -29,52 +29,85 @@ async def async_setup_entry(
     # getting the tis_api object from the config entry
     tis_api: TISApi = entry.runtime_data.api
 
-    # Fetch all switches from the TIS API we only have one type here
-    switches: dict = await tis_api.get_entities(platform=Platform.SWITCH)
-    if switches:
+    # Fetch and normalize switches into simple dictionaries
+    switch_dicts = await async_get_switches(tis_api)
+    if not switch_dicts:
+        return
 
-        # Prepare a list of tuples containing necessary switch details
-        switch_entities = [
-            (
-                appliance["name"],
-                list(appliance["channels"][0].values())[0],
-                appliance["device_id"],
-                appliance["is_protected"],
-                appliance["gateway"],
-            )
-            for appliance in switches
-        ]
-
-        # Create TISSwitch objects and add them to Home Assistant
-        tis_switches = [
-            TISSwitch(tis_api, switch_name, channel_number, device_id, gateway)
-            for switch_name, channel_number, device_id, is_protected, gateway in switch_entities
-        ]
-        async_add_devices(tis_switches, update_before_add=True)
+    # Create TISSwitch objects using **kwargs for readability
+    tis_switches = [TISSwitch(tis_api, **sd) for sd in switch_dicts]
+    async_add_devices(tis_switches, update_before_add=True)
 
 
-class TISSwitch(SwitchEntity):
-    """Representation of a TIS switch."""
+async def async_get_switches(tis_api: TISApi) -> list[dict]:
+    """Fetch switches from TIS API and normalize to a list of dictionaries.
+
+    Returns a list with items like:
+    {
+        "switch_name": str,
+        "channel_number": int,
+        "device_id": list[int],
+        "is_protected": bool,
+        "gateway": str,
+    }
+
+    Having this helper makes the setup code easier to test and keeps the
+    API parsing logic in one place.
+    """
+    raw = await tis_api.get_entities(platform=Platform.SWITCH)
+    if not raw:
+        return []
+
+    result: list[dict] = []
+    for appliance in raw:
+        channel_number = int(list(appliance["channels"][0].values())[0])
+        result.append(
+            {
+                "switch_name": appliance.get("name"),
+                "channel_number": channel_number,
+                "device_id": appliance.get("device_id"),
+                "is_protected": appliance.get("is_protected", False),
+                "gateway": appliance.get("gateway"),
+            }
+        )
+
+    return result
+
+
+class BaseTISSwitch:
+    """Base class for TIS switches."""
 
     def __init__(
         self,
         tis_api: TISApi,
-        switch_name: str,
+        *,
         channel_number: int,
         device_id: list[int],
         gateway: str,
+        is_protected: bool = False,
     ) -> None:
-        """Initialize the switch."""
+        """Initialize the base switch entity."""
         self.api = tis_api
-        self._name = switch_name
-        self._attr_unique_id = f"switch_{self.name}"
+
+        # Internal state representation (string states preserved to avoid behaviour changes)
         self._state = STATE_UNKNOWN
-        self._attr_is_on = None
-        self.name = switch_name
+        self._attr_is_on: Optional[bool] = None
+
+        # Unique id should be stable and deterministic for registries.
+        self._attr_unique_id = (
+            f"tis_{'_'.join(map(str, device_id))}_ch{int(channel_number)}"
+        )
+
+        # Public attributes
         self.device_id = device_id
         self.gateway = gateway
         self.channel_number = int(channel_number)
-        self.listener: Callable | None = None
+        self.is_protected = is_protected
+
+        # Listener / unsubscribe callable
+        self._listener: Optional[Callable] = None
+
+        # Create packets once and reuse them
         self.on_packet: TISPacket = TISProtocolHandler.generate_control_on_packet(self)
         self.off_packet: TISPacket = TISProtocolHandler.generate_control_off_packet(
             self
@@ -83,23 +116,26 @@ class TISSwitch(SwitchEntity):
             TISProtocolHandler.generate_control_update_packet(self)
         )
 
+    # --- Lifecycle hooks ---
     async def async_added_to_hass(self) -> None:
-        """Subscribe to events."""
+        """Subscribe to events when the entity is added to hass."""
 
         @callback
-        def handle_event(event: Event):
-            """Handle the event."""
+        def _handle_event(event: Event) -> None:
+            """Handle incoming TIS events and update internal state accordingly."""
 
             # check if event is for this switch
             if event.event_type == str(self.device_id):
-                if event.data["feedback_type"] == "control_response":
+                feedback_type = event.data.get("feedback_type")
+                if feedback_type == "control_response":
                     channel_value = event.data["additional_bytes"][2]
                     channel_number = event.data["channel_number"]
                     if int(channel_number) == self.channel_number:
                         self._state = (
                             STATE_ON if int(channel_value) == 100 else STATE_OFF
                         )
-                elif event.data["feedback_type"] == "binary_feedback":
+
+                elif feedback_type == "binary_feedback":
                     n_bytes = ceil(event.data["additional_bytes"][0] / 8)
                     channels_status = "".join(
                         int_to_8_bit_binary(event.data["additional_bytes"][i])
@@ -110,28 +146,32 @@ class TISSwitch(SwitchEntity):
                         if channels_status[self.channel_number - 1] == "1"
                         else STATE_OFF
                     )
-                elif event.data["feedback_type"] == "update_response":
+
+                elif feedback_type == "update_response":
                     additional_bytes = event.data["additional_bytes"]
                     channel_status = int(additional_bytes[self.channel_number])
                     self._state = STATE_ON if channel_status > 0 else STATE_OFF
-                elif event.data["feedback_type"] == "offline_device":
+
+                elif feedback_type == "offline_device":
                     self._state = STATE_UNKNOWN
 
-            # await self.async_update_ha_state(True)
             self.schedule_update_ha_state()
 
-        self.listener = self.hass.bus.async_listen(MATCH_ALL, handle_event)
+        self._listener = self.hass.bus.async_listen(MATCH_ALL, _handle_event)
         _ = await self.api.protocol.sender.send_packet(self.update_packet)
 
     async def async_will_remove_from_hass(self) -> None:
-        """Remove the listener when the entity is removed."""
-        self.listener = None
+        """Unsubscribe from events when entity is removed from hass."""
+        if callable(self._listener):
+            try:
+                self._listener()
+            finally:
+                self._listener = None
 
+    # --- Control methods ---
     async def async_turn_on(self, **kwargs: Any) -> None:
-        """Turn the switch on."""
-        ack_status = await self.api.protocol.sender.send_packet_with_ack(
-            self.on_packet,
-        )
+        """Turn the switch on (uses API send with ack)."""
+        ack_status = await self.api.protocol.sender.send_packet_with_ack(self.on_packet)
         if ack_status:
             self._state = STATE_ON
         else:
@@ -144,7 +184,7 @@ class TISSwitch(SwitchEntity):
         self.schedule_update_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        """Turn the switch off."""
+        """Turn the switch off (uses API send with ack)."""
         ack_status = await self.api.protocol.sender.send_packet_with_ack(
             self.off_packet
         )
@@ -154,6 +194,24 @@ class TISSwitch(SwitchEntity):
             self._state = STATE_UNKNOWN
         self.schedule_update_ha_state()
 
+
+class TISSwitch(SwitchEntity, BaseTISSwitch):
+    """Concrete TIS switch entity."""
+
+    def __init__(self, tis_api: TISApi, **kwargs: Any) -> None:
+        SwitchEntity.__init__(self)
+        BaseTISSwitch.__init__(
+            self,
+            tis_api,
+            channel_number=kwargs.get("channel_number"),
+            device_id=kwargs.get("device_id"),
+            gateway=kwargs.get("gateway"),
+            is_protected=kwargs.get("is_protected", False),
+        )
+
+        self._name = kwargs.get("switch_name")
+
+    # --- Properties ---
     @property
     def name(self) -> str:
         """Return the name of the switch."""
@@ -166,10 +224,5 @@ class TISSwitch(SwitchEntity):
 
     @property
     def is_on(self) -> bool:
-        """Return the state of the switch."""
-        if self._state == STATE_ON:
-            return True
-
-        elif self._state == STATE_OFF:
-            return False
-        return False
+        """Return True if the switch is on."""
+        return self._state == STATE_ON
