@@ -85,36 +85,32 @@ class BaseTISSwitch:
         device_id: list[int],
         gateway: str,
         is_protected: bool = False,
+        **kwargs: Any,
     ) -> None:
-        """Initialize the base switch entity."""
+        # Call next class in MRO (important for multiple inheritance)
+        super().__init__(**kwargs)
+
         self.api = tis_api
 
-        # Internal state representation (string states preserved to avoid behaviour changes)
+        # Internal state representation
         self._state = STATE_UNKNOWN
         self._attr_is_on: Optional[bool] = None
 
-        # Unique id should be stable and deterministic for registries.
         self._attr_unique_id = (
             f"tis_{'_'.join(map(str, device_id))}_ch{int(channel_number)}"
         )
 
-        # Public attributes
         self.device_id = device_id
         self.gateway = gateway
         self.channel_number = int(channel_number)
         self.is_protected = is_protected
 
-        # Listener / unsubscribe callable
         self._listener: Optional[Callable] = None
 
-        # Create packets once and reuse them
-        self.on_packet: TISPacket = TISProtocolHandler.generate_control_on_packet(self)
-        self.off_packet: TISPacket = TISProtocolHandler.generate_control_off_packet(
-            self
-        )
-        self.update_packet: TISPacket = (
-            TISProtocolHandler.generate_control_update_packet(self)
-        )
+        # Pre-generate packets
+        self.on_packet = TISProtocolHandler.generate_control_on_packet(self)
+        self.off_packet = TISProtocolHandler.generate_control_off_packet(self)
+        self.update_packet = TISProtocolHandler.generate_control_update_packet(self)
 
     # --- Lifecycle hooks ---
     async def async_added_to_hass(self) -> None:
@@ -199,16 +195,13 @@ class TISSwitch(SwitchEntity, BaseTISSwitch):
     """Concrete TIS switch entity."""
 
     def __init__(self, tis_api: TISApi, **kwargs: Any) -> None:
-        SwitchEntity.__init__(self)
-        BaseTISSwitch.__init__(
-            self,
-            tis_api,
+        super().__init__(
+            tis_api=tis_api,
             channel_number=kwargs.get("channel_number"),
             device_id=kwargs.get("device_id"),
             gateway=kwargs.get("gateway"),
             is_protected=kwargs.get("is_protected", False),
         )
-
         self._name = kwargs.get("switch_name")
 
     # --- Properties ---
