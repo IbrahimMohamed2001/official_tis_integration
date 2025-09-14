@@ -74,7 +74,7 @@ async def async_get_switches(tis_api: TISApi) -> list[dict]:
     return result
 
 
-class BaseTISSwitch:
+class BaseTISSwitch(SwitchEntity):
     """Base class for TIS switches."""
 
     def __init__(
@@ -184,7 +184,7 @@ class BaseTISSwitch:
         self.schedule_update_ha_state()
 
 
-class TISSwitch(SwitchEntity, BaseTISSwitch):
+class TISSwitch(BaseTISSwitch, SwitchEntity):
     """Concrete TIS switch entity."""
 
     def __init__(self, tis_api: TISApi, **kwargs: Any) -> None:
