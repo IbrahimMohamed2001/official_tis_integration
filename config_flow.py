@@ -11,7 +11,6 @@ from homeassistant.const import CONF_PORT
 from homeassistant.core import callback
 
 _LOGGER = logging.getLogger(__name__)
-schema = vol.Schema({vol.Required(CONF_PORT): int}, required=True)
 
 
 class TISConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -36,7 +35,7 @@ class TISConfigFlow(ConfigFlow, domain=DOMAIN):
                 return self.async_create_entry(
                     title="TIS Control Bridge", data=user_input
                 )
-            else:  # noqa: RET505
+            else:
                 # If there are errors, show the form again with the error message
                 logging.error(f"Errors occurred: {errors}")
                 return self._show_setup_form(errors)
@@ -47,6 +46,11 @@ class TISConfigFlow(ConfigFlow, domain=DOMAIN):
     @callback
     def _show_setup_form(self, errors=None) -> ConfigFlowResult:
         """Show the setup form to the user."""
+
+        schema = vol.Schema(
+            {vol.Required(CONF_PORT, default=6000): int},
+            required=True,
+        )
         return self.async_show_form(
             step_id="user",
             data_schema=schema,
