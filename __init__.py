@@ -1,8 +1,9 @@
-"""The TISControl integration."""
+"""The TIS Control integration."""
 
 from __future__ import annotations
 
 import logging
+
 from attr import dataclass
 from TISApi.api import TISApi
 
@@ -13,10 +14,12 @@ from homeassistant.exceptions import ConfigEntryNotReady
 
 from .const import DEVICES_DICT, DOMAIN
 
+_LOGGER = logging.getLogger(__name__)
+
 
 @dataclass
 class TISData:
-    """TISControl data stored in the ConfigEntry."""
+    """TIS Control data stored in the ConfigEntry."""
 
     api: TISApi
 
@@ -24,16 +27,16 @@ class TISData:
 # Define the Home Assistant platforms that this integration will support.
 PLATFORMS: list[Platform] = [Platform.SWITCH]
 # Create a type alias for a ConfigEntry specific to this integration.
-type TISConfigEntry = ConfigEntry[TISApi]
+type TISConfigEntry = ConfigEntry[TISData]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: TISConfigEntry) -> bool:
-    """Set up TISControl from a config entry."""
+    """Set up TIS Control from a config entry."""
     hass.data.setdefault(DOMAIN, {})
 
     # Initialize the TIS API with configuration data from the user's entry.
     tis_api = TISApi(
-        port=int(entry.data.get("port")),
+        port=int(entry.data["port"]),
         hass=hass,
         domain=DOMAIN,
         devices_dict=DEVICES_DICT,
@@ -46,7 +49,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: TISConfigEntry) -> bool:
         await tis_api.connect()
     except ConnectionError as e:
         # If connection fails, raise ConfigEntryNotReady to prompt Home Assistant to retry setup later.
-        logging.error(f"Failed to connect: {e}")
+        _LOGGER.error("Failed to connect: %s", e)
         raise ConfigEntryNotReady from e
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True

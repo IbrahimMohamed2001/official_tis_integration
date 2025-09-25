@@ -5,12 +5,12 @@ from __future__ import annotations
 from typing import Any
 
 from TISApi.api import TISApi
-from TISApi.utils import async_get_switches
 from TISApi.components.switch.base_switch import BaseTISSwitch
+from TISApi.utils import async_get_switches
 
+from homeassistant.components.switch import SwitchEntity
 from homeassistant.const import STATE_ON
 from homeassistant.core import HomeAssistant
-from homeassistant.components.switch import SwitchEntity
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import TISConfigEntry
@@ -45,13 +45,13 @@ class TISSwitch(BaseTISSwitch, SwitchEntity):
         # Pass the core device identifiers to the parent API class.
         super().__init__(
             tis_api=tis_api,
-            channel_number=kwargs.get("channel_number"),
-            device_id=kwargs.get("device_id"),
-            gateway=kwargs.get("gateway"),
+            channel_number=kwargs.get("channel_number", 0),
+            device_id=kwargs.get("device_id", []),
+            gateway=kwargs.get("gateway", ""),
             is_protected=kwargs.get("is_protected", False),
         )
         # Set the friendly name for the Home Assistant UI.
-        self._name = kwargs.get("switch_name")
+        self._name = kwargs.get("switch_name", "")
 
     @property
     def name(self) -> str:
