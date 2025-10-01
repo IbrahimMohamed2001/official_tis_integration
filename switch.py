@@ -62,7 +62,6 @@ class TISSwitch(SwitchEntity, BaseTISSwitch):
             f"tis_{'_'.join(map(str, device_id_list))}_ch{int(channel)}"
         )
 
-        self._attr_available = True
         self._attr_is_on = None
 
     async def async_turn_on(self, **kwargs: Any) -> None:
@@ -73,10 +72,9 @@ class TISSwitch(SwitchEntity, BaseTISSwitch):
         if result:
             # Optimistic update: assume the command succeeded if we got an ack.
             self._attr_is_on = True
-            self._attr_available = True
         else:
             # If no ack was received, the device is likely offline.
-            self._attr_available = False
+            self._attr_is_on = None
 
         self.async_write_ha_state()
 
@@ -88,8 +86,7 @@ class TISSwitch(SwitchEntity, BaseTISSwitch):
         # Optimistically update the state based on whether the command was acknowledged.
         if result:
             self._attr_is_on = False
-            self._attr_available = True
         else:
-            self._attr_available = False
+            self._attr_is_on = None
 
         self.async_write_ha_state()
