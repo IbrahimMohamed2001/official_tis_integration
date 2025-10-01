@@ -9,15 +9,16 @@ from TISApi.components.switch.base_switch import BaseTISSwitch
 from TISApi.utils import async_get_switches
 
 from homeassistant.components.switch import SwitchEntity
-from homeassistant.const import STATE_ON, STATE_OFF, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import TISConfigEntry
 
 
 async def async_setup_entry(
-    hass: HomeAssistant, entry: TISConfigEntry, async_add_devices: AddEntitiesCallback
+    hass: HomeAssistant,
+    entry: TISConfigEntry,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up the TIS switches from a config entry."""
 
@@ -31,7 +32,7 @@ async def async_setup_entry(
 
     # Create an entity object for each switch found and add them to Home Assistant.
     tis_switches = [TISSwitch(tis_api, **sd) for sd in switch_dicts]
-    async_add_devices(tis_switches, update_before_add=True)
+    async_add_entities(tis_switches, update_before_add=True)
 
 
 class TISSwitch(SwitchEntity, BaseTISSwitch):
@@ -42,36 +43,42 @@ class TISSwitch(SwitchEntity, BaseTISSwitch):
 
     def __init__(self, tis_api: TISApi, **kwargs: Any) -> None:
         """Initialize the switch entity."""
+        device_id_list = kwargs.get("device_id", [])
+        channel = kwargs.get("channel_number", 0)
+        gateway = kwargs.get("gateway", "")
+
         # Pass the core device identifiers to the parent API class.
         super().__init__(
             tis_api=tis_api,
-            channel_number=kwargs.get("channel_number", 0),
-            device_id=kwargs.get("device_id", []),
-            gateway=kwargs.get("gateway", ""),
+            channel_number=channel,
+            device_id=device_id_list,
+            gateway=gateway,
             is_protected=kwargs.get("is_protected", False),
         )
+
         # Set the friendly name for the Home Assistant UI.
-        self._name = kwargs.get("switch_name", "")
+        self._attr_name = kwargs.get("switch_name", "")
+        self._attr_unique_id = (
+            f"tis_{'_'.join(map(str, device_id_list))}_ch{int(channel)}"
+        )
+
+        self._attr_available = True
+        self._attr_is_on = None
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the switch on."""
         # Attempt to turn the switch on and wait for the result.
         result = await self.turn_switch_on(**kwargs)
+
         if result:
             # Optimistic update: assume the command succeeded if we got an ack.
-            self._state = STATE_ON
+            self._attr_is_on = True
+            self._attr_available = True
         else:
             # If no ack was received, the device is likely offline.
-            self._state = STATE_UNKNOWN
-            # Fire an event to notify other entities that this device is offline.
-            event_data = {
-                "device_id": self.device_id,
-                "feedback_type": "offline_device",
-            }
-            self.hass.bus.async_fire(str(self.device_id), event_data)
+            self._attr_available = False
 
-        # Schedule a state update in Home Assistant's UI.
-        self.schedule_update_ha_state()
+        self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the switch off."""
@@ -79,20 +86,10 @@ class TISSwitch(SwitchEntity, BaseTISSwitch):
         result = await self.turn_switch_off(**kwargs)
 
         # Optimistically update the state based on whether the command was acknowledged.
-        self._state = STATE_OFF if result else STATE_UNKNOWN
-        self.schedule_update_ha_state()
+        if result:
+            self._attr_is_on = False
+            self._attr_available = True
+        else:
+            self._attr_available = False
 
-    @property
-    def name(self) -> str:
-        """Return the name of the switch."""
-        return self._name
-
-    @name.setter
-    def name(self, value: str) -> None:
-        """Set the name of the switch."""
-        self._name = value
-
-    @property
-    def is_on(self) -> bool:
-        """Return the current state of the switch (True if on, False if off)."""
-        return self._state == STATE_ON
+        self.async_write_ha_state()
