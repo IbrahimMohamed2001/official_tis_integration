@@ -52,10 +52,11 @@ class TISSwitch(SwitchEntity):
         """Run when entity about to be added to Home Assistant."""
         # Register the HASS update method as the callback
         self.device_api.register_callback(self.async_write_ha_state)
-        self._attr_is_on = self.device_api.is_on
 
         # Request an initial state update from the device
         await self.device_api.request_update()
+        self._attr_is_on = self.device_api.is_on
+        self.async_write_ha_state()
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the switch on."""
