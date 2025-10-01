@@ -5,11 +5,11 @@ from __future__ import annotations
 from typing import Any
 
 from TISApi.api import TISApi
-from TISApi.components.switch.base_switch import BaseTISSwitch
+from TISApi.components.switch.base_switch import TISAPISwitch
 from TISApi.utils import async_get_switches
 
 from homeassistant.components.switch import SwitchEntity
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import TISConfigEntry
@@ -31,43 +31,35 @@ async def async_setup_entry(
         return
 
     # Create an entity object for each switch found and add them to Home Assistant.
-    tis_switches = [TISSwitch(tis_api, **sd) for sd in switch_dicts]
+    tis_switches = [TISSwitch(TISAPISwitch(tis_api, **sd)) for sd in switch_dicts]
     async_add_entities(tis_switches, update_before_add=True)
 
 
-class TISSwitch(SwitchEntity, BaseTISSwitch):
-    """Represents a TIS switch entity in Home Assistant.
+class TISSwitch(SwitchEntity):
+    """Represents a TIS switch entity in Home Assistant."""
 
-    Inherits from BaseTISSwitch (for API communication) and SwitchEntity (for HA integration).
-    """
-
-    def __init__(self, tis_api: TISApi, **kwargs: Any) -> None:
+    def __init__(self, device_api: TISAPISwitch) -> None:
         """Initialize the switch entity."""
-        device_id_list = kwargs.get("device_id", [])
-        channel = kwargs.get("channel_number", 0)
-        gateway = kwargs.get("gateway", "")
-
-        # Pass the core device identifiers to the parent API class.
-        super().__init__(
-            tis_api=tis_api,
-            channel_number=channel,
-            device_id=device_id_list,
-            gateway=gateway,
-            is_protected=kwargs.get("is_protected", False),
-        )
+        self.device_api = device_api
 
         # Set the friendly name for the Home Assistant UI.
-        self._attr_name = kwargs.get("switch_name", "")
-        self._attr_unique_id = (
-            f"tis_{'_'.join(map(str, device_id_list))}_ch{int(channel)}"
-        )
+        self._attr_name = self.device_api.name
+        self._attr_unique_id = self.device_api.unique_id
 
-        self._attr_is_on = None
+        self._attr_is_on = self.device_api.is_on
+
+    async def async_added_to_hass(self) -> None:
+        """Run when entity about to be added to Home Assistant."""
+        # Register the HASS update method as the callback
+        self.device_api.register_callback(self.async_write_ha_state)
+
+        # Request an initial state update from the device
+        await self.device_api.request_update()
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the switch on."""
         # Attempt to turn the switch on and wait for the result.
-        result = await self.turn_switch_on(**kwargs)
+        result = await self.device_api.turn_switch_on()
 
         if result:
             # Optimistic update: assume the command succeeded if we got an ack.
@@ -81,7 +73,7 @@ class TISSwitch(SwitchEntity, BaseTISSwitch):
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the switch off."""
         # Send the 'off' packet and wait for an acknowledgement.
-        result = await self.turn_switch_off(**kwargs)
+        result = await self.device_api.turn_switch_off()
 
         # Optimistically update the state based on whether the command was acknowledged.
         if result:
@@ -90,3 +82,9 @@ class TISSwitch(SwitchEntity, BaseTISSwitch):
             self._attr_is_on = None
 
         self.async_write_ha_state()
+
+    @callback
+    def async_write_ha_state(self) -> None:
+        """Write the state to Home Assistant, getting the value from the device."""
+        self._attr_is_on = self.device_api.is_on
+        super().async_write_ha_state()
