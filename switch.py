@@ -9,7 +9,7 @@ from TISApi.components.switch.base_switch import TISAPISwitch
 from TISApi.utils import async_get_switches
 
 from homeassistant.components.switch import SwitchEntity
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import TISConfigEntry
@@ -52,6 +52,7 @@ class TISSwitch(SwitchEntity):
         """Run when entity about to be added to Home Assistant."""
         # Register the HASS update method as the callback
         self.device_api.register_callback(self.async_write_ha_state)
+        self._attr_is_on = self.device_api.is_on
 
         # Request an initial state update from the device
         await self.device_api.request_update()
@@ -82,9 +83,3 @@ class TISSwitch(SwitchEntity):
             self._attr_is_on = None
 
         self.async_write_ha_state()
-
-    @callback
-    def async_write_ha_state(self) -> None:
-        """Write the state to Home Assistant, getting the value from the device."""
-        self._attr_is_on = self.device_api.is_on
-        super().async_write_ha_state()
