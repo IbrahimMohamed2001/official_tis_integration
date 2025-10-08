@@ -41,8 +41,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: TISConfigEntry) -> bool:
         domain=DOMAIN,
         devices_dict=DEVICES_DICT,
     )
-    # Store the API object in the config entry so it can be accessed by platforms.
-    entry.runtime_data = TISData(api=tis_api)
+    # Store the API object in the `hass` object so it can be accessed by platforms.
+    hass.data[DOMAIN]["api"] = tis_api
 
     try:
         # Establish a connection to the TIS gateway.

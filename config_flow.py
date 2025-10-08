@@ -18,13 +18,16 @@ _LOGGER = logging.getLogger(__name__)
 class TISConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for TISControl."""
 
-    VERSION = 1
-
     async def async_step_user(self, user_input: dict | None = None) -> ConfigFlowResult:
         """Handle a flow initiated by the user."""
         errors: dict[str, str] = {}
         if user_input is not None:
+            unique_id = f"tis_control:{user_input[CONF_PORT]}"
+            await self.async_set_unique_id(unique_id)
+            self._abort_if_unique_id_configured()
+
             _LOGGER.info("Received user input %s", user_input)
+
             # Assuming a function `validate_port` that returns True if the port is valid
             is_valid = await self.validate_port(user_input[CONF_PORT])
             if not is_valid:
