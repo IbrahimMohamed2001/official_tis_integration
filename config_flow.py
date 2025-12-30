@@ -11,7 +11,6 @@ from homeassistant.const import CONF_PORT
 from homeassistant.core import callback
 from TISApi.api import TISApi
 
-from . import TISData
 from .const import DEVICES_DICT, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
@@ -35,10 +34,7 @@ class TISConfigFlow(ConfigFlow, domain=DOMAIN):
                 return self._show_setup_form(errors=errors)
 
             _LOGGER.info("Received user input %s", user_input)
-            entry = self.async_create_entry(title="TIS Control Bridge", data=user_input)
-            entry.runtime_data = TISData(tis_api=self.tis_api)
-
-            return entry
+            return self.async_create_entry(title="TIS Control Bridge", data=user_input)
 
         # If user_input is None (initial step), show the setup form
         return self._show_setup_form(errors=errors)
@@ -66,7 +62,6 @@ class TISConfigFlow(ConfigFlow, domain=DOMAIN):
         )
         try:
             await tis_api.connect()
-            self.tis_api: TISApi = tis_api
             return True
         except ConnectionError as e:
             _LOGGER.error("Failed to connect: %s", e)
