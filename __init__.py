@@ -5,11 +5,13 @@ from __future__ import annotations
 import logging
 
 from attr import dataclass
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import CONF_PORT, Platform
+from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryNotReady
 from TISApi.api import TISApi
 
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
+from .const import DEVICES_DICT, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -31,7 +33,21 @@ type TISConfigEntry = ConfigEntry[TISData]
 async def async_setup_entry(hass: HomeAssistant, entry: TISConfigEntry) -> bool:
     """Set up TIS Control from a config entry."""
     # Get the TISApi instance from the user's entry.
-    tis_api: TISApi = entry.runtime_data.tis_api
+    tis_api: TISApi = TISApi(
+        port=int(entry.data[CONF_PORT]),
+        domain=DOMAIN,
+        devices_dict=DEVICES_DICT,
+    )
+
+    try:
+        await tis_api.connect()
+    except ConnectionError as e:
+        # If connection fails, raise ConfigEntryNotReady
+        # to prompt Home Assistant to retry setup later.
+        _LOGGER.error("Failed to connect: %s", e)
+        raise ConfigEntryNotReady(
+            f"Failed to connect to TIS API Gateway, error: {e}"
+        ) from e
 
     async def listen_for_events():
         # This will run forever, pulling data from the library
