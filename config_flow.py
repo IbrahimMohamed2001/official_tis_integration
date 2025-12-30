@@ -66,7 +66,7 @@ class TISConfigFlow(ConfigFlow, domain=DOMAIN):
         )
         try:
             await tis_api.connect()
-            self.tis_api = tis_api
+            self.tis_api: TISApi = tis_api
             return True
         except ConnectionError as e:
             _LOGGER.error("Failed to connect: %s", e)
