@@ -10,9 +10,6 @@ from TISApi.api import TISApi
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryNotReady
-
-from .const import DEVICES_DICT, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -21,7 +18,7 @@ _LOGGER = logging.getLogger(__name__)
 class TISData:
     """TIS Control data stored in the ConfigEntry."""
 
-    api: TISApi
+    tis_api: TISApi
 
 
 # Define the Home Assistant platforms that this integration will support.
@@ -33,26 +30,25 @@ type TISConfigEntry = ConfigEntry[TISData]
 
 async def async_setup_entry(hass: HomeAssistant, entry: TISConfigEntry) -> bool:
     """Set up TIS Control from a config entry."""
-    # Initialize the TIS API with configuration data from the user's entry.
-    tis_api = TISApi(
-        port=int(entry.data["port"]),
-        hass=hass,
-        domain=DOMAIN,
-        devices_dict=DEVICES_DICT,
-    )
+    # Get the TISApi instance from the user's entry.
+    tis_api: TISApi = entry.runtime_data.tis_api
 
-    # Store the API object in the config entry so it can be accessed by platforms.
-    entry.runtime_data = TISData(api=tis_api)
+    async def listen_for_events():
+        # This will run forever, pulling data from the library
+        async for event in tis_api.consume_events():
+            device_id = event["device_id"]
+            hass.bus.async_fire(f"tis_device_{device_id}", event)
+
+    # Add this listener to the HA loop as a background task
+    entry.async_create_background_task(hass, listen_for_events(), "tis_event_listener")
 
     try:
-        # Establish a connection to the TIS gateway.
-        await tis_api.connect()
-    except ConnectionError as e:
-        # If connection fails, raise ConfigEntryNotReady to prompt Home Assistant to retry setup later.
-        _LOGGER.error("Failed to connect: %s", e)
-        raise ConfigEntryNotReady(
-            f"Failed to connect to TIS API Gateway, error: {e}"
-        ) from e
+        await tis_api.scan_devices()
+        _LOGGER.info("scanned devices successfully")
+    except Exception as e:
+        _LOGGER.error(
+            "Error happened while scanning the network for devices: %s", str(e)
+        )
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
