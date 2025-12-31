@@ -49,6 +49,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: TISConfigEntry) -> bool:
             f"Failed to connect to TIS API Gateway, error: {e}"
         ) from e
 
+    entry.runtime_data = TISData(tis_api=tis_api)
+
     async def listen_for_events():
         # This will run forever, pulling data from the library
         async for event in tis_api.consume_events():
